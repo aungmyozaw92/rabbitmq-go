@@ -2,63 +2,53 @@ package main
 
 import (
 	"log"
+	"sync"
 
-	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/aungmyozaw92/rabbitmq-go"
 )
 
-func failOnErr(err error, msg string){
-	if err != nil {
-		log.Fatalf("%s: %s", msg, err)
-	}
-}
+const (
+	rabbitMQURL = "amqp://guest:guest@localhost:5672/"
+	queueName   = "TestingQueue"
+)
 
-const queueName = "TestingQueue"
-
-
-func main(){
-	// connect to RabbitMQ
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
-	failOnErr(err, "Failed to connect to RabbitMQ")
+func main() {
+	// Connect to RabbitMQ
+	conn := rabbitmq.Connect(rabbitMQURL)
 	defer conn.Close()
 
 	// Create a channel
-	ch, err := conn.Channel()
-	failOnErr(err, "Failed to open a channel")
+	ch := rabbitmq.CreateChannel(conn)
 	defer ch.Close()
 
-
 	// Declare a queue
-	q, err := ch.QueueDeclare(
-		queueName, // Queue name
-		false,   // Durable
-		false,   // Delete when unused
-		false,   // Exclusive
-		false,   // No-wait
-		nil,     // Arguments
-	)
-	failOnErr(err, "Failed to declare a queue")
+	q := rabbitmq.DeclareQueue(ch, queueName)
 
 	// Consume messages
 	msgs, err := ch.Consume(
-		q.Name, // Queue name
-		"",     // Consumer
-		true,   // Auto-acknowledge
-		false,  // Exclusive
-		false,  // No-local
-		false,  // No-wait
-		nil,    // Arguments
+		q.Name,
+		"",    // Consumer
+		true,  // Auto-acknowledge
+		false, // Exclusive
+		false, // No-local
+		false, // No-wait
+		nil,   // Arguments
 	)
-	failOnErr(err, "Failed to register a consumer")
+	rabbitmq.FailOnError(err, "Failed to register a consumer")
 
 	// Process messages
-	forever := make(chan bool)
-	
-	go func() {
-		for d := range msgs {
-			log.Printf("Received a message: %s", d.Body)
-		}
-	}()
+
+	var processedMessages sync.Map // Thread-safe map
 
 	log.Printf(" [*] Waiting for messages. To exit press CTRL+C")
-	<-forever
+	for d := range msgs {
+		if _, exists := processedMessages.Load(d.MessageId); exists {
+			log.Printf("duplicate message detected: %s", d.MessageId)
+			continue
+		}
+		processedMessages.Store(d.MessageId, true)
+		log.Printf("Received a message: %s", d.Body)
+		log.Printf("Processing message: %s", d.Body)
+
+	}
 }

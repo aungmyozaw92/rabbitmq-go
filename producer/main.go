@@ -5,54 +5,48 @@ import (
 	"log"
 	"time"
 
+	"github.com/aungmyozaw92/rabbitmq-go"
+	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func failOnErr(err error, msg string){
-	if err != nil {
-		log.Fatalf("%s: %s", msg, err)
-	}
-}
+const (
+	rabbitMQURL = "amqp://guest:guest@localhost:5672/"
+	queueName   = "TestingQueue"
+)
 
-const queueName = "TestingQueue"
-
-
-func main(){
-	// connect to RabbitMQ
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
-	failOnErr(err, "Failed to connect to RabbitMQ")
+func main() {
+	// Connect to RabbitMQ
+	conn := rabbitmq.Connect(rabbitMQURL)
 	defer conn.Close()
 
 	// Create a channel
-	ch, err := conn.Channel()
-	failOnErr(err, "Failed to open a channel")
+	ch := rabbitmq.CreateChannel(conn)
 	defer ch.Close()
 
 	// Declare a queue
-	q, err := ch.QueueDeclare(
-		queueName, // Queue name
-		false,   // Durable
-		false,   // Delete when unused
-		false,   // Exclusive
-		false,   // No-wait
-		nil,     // Arguments
-	)
-	failOnErr(err, "Failed to declare a queue")
+	q := rabbitmq.DeclareQueue(ch, queueName)
 
+	// Set a timeout context for publishing
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	// Publish a message
 	body := "Hello RabbitMQ!"
-	err = ch.PublishWithContext(ctx,
-		"",     // exchange
-		q.Name, // routing key
-		false,  // mandatory
-		false,  // immediate
-		amqp.Publishing {
+	messageId := uuid.New().String() // Generate unique ID
+
+	err := ch.PublishWithContext(ctx,
+		"",     // Exchange
+		q.Name, // Routing key
+		false,  // Mandatory
+		false,  // Immediate
+		amqp.Publishing{
 			ContentType: "text/plain",
 			Body:        []byte(body),
+			MessageId:   messageId, // Unique identifier
+
 		})
-	failOnErr(err, "Failed to publish a message")
-	log.Printf(" [x] Sent %s\n", body)
+	rabbitmq.FailOnError(err, "Failed to publish a message")
+
+	log.Printf(" [x] Sent %s\n %s\n", body, messageId)
 }
